@@ -1,0 +1,25 @@
+node_modules/
+dist/
+__pycache__/
+*.pyc
+.env
+.pytest_cache/
+temp.txt
+
+# Databases
+*.db
+*.sqlite3
+*-shm
+*-wal
+
+# Models
+backend/models/xR_model.pkl
+backend/models/xW_model.pkl
+*.pkl
+
+# Excluded project assets as requested
+ui-ux-pro-max/
+designing-architecture/
+code-review/
+data/
+ckmdesign/

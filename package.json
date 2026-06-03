@@ -1,0 +1,7 @@
+{
+  "name": "cricviz-dashboard",
+  "private": true,
+  "scripts": {
+    "dev": "npx concurrently -k \"cd frontend && npm run dev:ui\" \"cd backend && uvicorn main:app --reload\" \"cd backend && celery -A worker.celery_app worker --pool=solo --loglevel=info\""
+  }
+}
