@@ -202,6 +202,7 @@ def get_worm_data(db: Session, match_id: str) -> List[Dict[str, Any]]:
             Delivery.innings,
             Delivery.over,
             func.sum(Delivery.runs_bat + Delivery.runs_extras).label("total_runs"),
+            func.count(Delivery.wicket_type).label("wickets"),
         )
         .filter(Delivery.match_id == match_id)
         .group_by(Delivery.innings, Delivery.over)
@@ -210,9 +211,12 @@ def get_worm_data(db: Session, match_id: str) -> List[Dict[str, Any]]:
     )
 
     # Build per-innings data
-    innings_data: Dict[int, Dict[int, int]] = {}
+    innings_data: Dict[int, Dict[int, Dict[str, int]]] = {}
     for r in rows:
-        innings_data.setdefault(r.innings, {})[r.over] = r.total_runs
+        innings_data.setdefault(r.innings, {})[r.over] = {
+            "runs": r.total_runs,
+            "wickets": r.wickets
+        }
 
     # Find max overs across all innings
     all_overs = set()
@@ -228,12 +232,18 @@ def get_worm_data(db: Session, match_id: str) -> List[Dict[str, Any]]:
     result = []
     cum1, cum2 = 0, 0
     for ov in range(0, max_over + 1):
-        cum1 += innings_data.get(1, {}).get(ov, 0)
-        cum2 += innings_data.get(2, {}).get(ov, 0)
+        d1 = innings_data.get(1, {}).get(ov, {"runs": 0, "wickets": 0})
+        d2 = innings_data.get(2, {}).get(ov, {"runs": 0, "wickets": 0})
+        cum1 += d1["runs"]
+        cum2 += d2["runs"]
         result.append({
             "over": ov + 1,  # 1-indexed for display
             "innings1_runs": cum1,
             "innings2_runs": cum2,
+            "innings1_wickets": d1["wickets"],
+            "innings2_wickets": d2["wickets"],
+            "innings1_marginal_runs": d1["runs"],
+            "innings2_marginal_runs": d2["runs"],
         })
 
     return result

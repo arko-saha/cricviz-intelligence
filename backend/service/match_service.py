@@ -52,11 +52,17 @@ def get_match_deliveries(
     return match_repo.get_deliveries_for_match(db, match_id, innings, over)
 
 
-def get_worm_chart_data(db: Session, match_id: str) -> Optional[List[Dict[str, Any]]]:
+def get_worm_chart_data(db: Session, match_id: str) -> Optional[Dict[str, Any]]:
     match = match_repo.get_match_by_id(db, match_id)
     if not match:
         return None
-    return match_repo.get_worm_data(db, match_id)
+    data = match_repo.get_worm_data(db, match_id)
+    return {
+        "match_id": match_id,
+        "team1": match.team1,
+        "team2": match.team2,
+        "data": data
+    }
 
 
 def get_player_profile(db: Session, player_id: str) -> Optional[Dict[str, Any]]:

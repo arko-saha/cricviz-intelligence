@@ -95,10 +95,16 @@ class WormDataPoint(BaseModel):
     over: int
     innings1_runs: int
     innings2_runs: int
+    innings1_wickets: int
+    innings2_wickets: int
+    innings1_marginal_runs: int
+    innings2_marginal_runs: int
 
 
 class WormResponse(BaseModel):
     match_id: str
+    team1: str
+    team2: str
     data: List[WormDataPoint]
 
 

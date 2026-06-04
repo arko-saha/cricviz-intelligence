@@ -208,12 +208,14 @@ async def worm_chart(
 ):
     """Returns cumulative run data per over for worm chart."""
     try:
-        data = match_service.get_worm_chart_data(db, match_id)
-        if data is None:
+        resp_data = match_service.get_worm_chart_data(db, match_id)
+        if resp_data is None:
             raise HTTPException(status_code=404, detail="Match not found")
         return WormResponse(
-            match_id=match_id,
-            data=[WormDataPoint(**d) for d in data],
+            match_id=resp_data["match_id"],
+            team1=resp_data["team1"],
+            team2=resp_data["team2"],
+            data=[WormDataPoint(**d) for d in resp_data["data"]],
         )
     except HTTPException:
         raise

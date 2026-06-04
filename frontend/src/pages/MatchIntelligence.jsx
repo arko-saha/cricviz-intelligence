@@ -4,7 +4,8 @@ import { useQuery } from '@tanstack/react-query';
 import { fetchMatches, fetchDeliveries, fetchWormData } from '../api/client';
 import useUIStore from '../store/uiStore';
 import WormChart from '../charts/WormChart';
-import HeatmapGrid from '../charts/HeatmapGrid';
+import ManhattanChart from '../charts/ManhattanChart';
+import PitchMap from '../charts/PitchMap';
 import EmptyState from '../components/EmptyState';
 
 /**
@@ -225,6 +226,44 @@ function MatchDetail({ matchId }) {
     setTimeout(() => setAIContext(summary, 'match'), 0);
   }
 
+  const exportToCSV = () => {
+    if (!deliveries || deliveries.length === 0) return;
+    
+    // Define headers
+    const headers = [
+      "Innings", "Over", "Ball", "Bowler", "Batter", "Runs", "Extras", 
+      "Wicket", "Intent", "Zone", "False Shot", "xR", "xW"
+    ];
+    
+    // Map data
+    const csvData = deliveries.map(d => [
+      d.innings,
+      d.over,
+      d.ball,
+      `"${d.bowler}"`,
+      `"${d.batter}"`,
+      d.runs_bat,
+      d.runs_extras,
+      `"${d.wicket_type || ''}"`,
+      d.shot_intent,
+      d.pitch_zone,
+      d.is_false_shot ? 'YES' : 'NO',
+      d.xR.toFixed(2),
+      d.xW.toFixed(3)
+    ].join(','));
+    
+    const csvContent = [headers.join(','), ...csvData].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `match_${matchId}_deliveries.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
     <div className="fade-in">
       <div style={{ marginBottom: 'var(--space-4)' }}>
@@ -233,17 +272,30 @@ function MatchDetail({ matchId }) {
         </button>
       </div>
 
-      {/* Worm Chart + Heatmap side by side */}
+      {/* Worm and Manhattan Charts */}
       <div className="grid-2" style={{ marginBottom: 'var(--space-6)' }}>
-        <WormChart data={wormData?.data || []} />
-        <HeatmapGrid deliveries={deliveries} />
+        <WormChart data={wormData?.data || []} team1={wormData?.team1} team2={wormData?.team2} />
+        <ManhattanChart data={wormData?.data || []} team1={wormData?.team1} team2={wormData?.team2} />
+      </div>
+
+      <div style={{ marginBottom: 'var(--space-6)' }}>
+        <PitchMap deliveries={deliveries} />
       </div>
 
       {/* Delivery Explorer */}
       <div className="card">
-        <div className="card-header">
-          <span className="card-title">Delivery Explorer</span>
-          <span className="badge badge-muted">{deliveries.length} deliveries</span>
+        <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <span className="card-title">Delivery Explorer</span>
+            <span className="badge badge-muted" style={{ marginLeft: 'var(--space-2)' }}>{deliveries.length} deliveries</span>
+          </div>
+          <button 
+            className="btn btn-secondary text-xs" 
+            onClick={exportToCSV}
+            title="Export as CSV"
+          >
+            📥 Export CSV
+          </button>
         </div>
 
         <div className="filter-bar">
