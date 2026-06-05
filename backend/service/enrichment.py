@@ -4,36 +4,20 @@ CricViz Enrichment Engine — Section 3.
 Pure, stateless function module. No DB calls, no HTTP calls.
 Every function takes a delivery dict (and optional commentary) and returns
 a computed metric. Fully unit-testable in isolation.
+
+ML model inference is delegated to ``ml.predictor`` which handles
+model loading, feature construction, and hot-reload.
 """
 from typing import Dict, Any
-import os
 import logging
-import pandas as pd
-import joblib
+
+from ml.predictor import CricVizPredictor
 
 logger = logging.getLogger("cricviz.enrichment")
 
-# Load ML models globally at module startup if they exist
-MODELS_DIR = os.path.join(os.path.dirname(__file__), "..", "ml", "models")
-XR_MODEL_PATH = os.path.join(MODELS_DIR, "xR_model.pkl")
-XW_MODEL_PATH = os.path.join(MODELS_DIR, "xW_model.pkl")
-
-xr_model = None
-xw_model = None
-
-try:
-    if os.path.exists(XR_MODEL_PATH):
-        xr_model = joblib.load(XR_MODEL_PATH)
-        logger.info("Loaded xR model from disk.")
-except Exception as e:
-    logger.warning(f"Could not load xR model: {e}")
-
-try:
-    if os.path.exists(XW_MODEL_PATH):
-        xw_model = joblib.load(XW_MODEL_PATH)
-        logger.info("Loaded xW model from disk.")
-except Exception as e:
-    logger.warning(f"Could not load xW model: {e}")
+predictor = CricVizPredictor()
+xr_model = predictor.xr_model
+xw_model = predictor.xw_model
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -46,6 +30,12 @@ _INTENT_TOKENS = [
     ("ATTACKING", {
         "six", "four", "smashed", "heaved", "slapped", "slog",
         "pulled", "hooked", "lofted", "blasted", "maximum",
+        "ramp", "switch hit", "scoop", "reverse sweep", "upper cut",
+        "pull", "hook", "cleared the boundary"
+    }),
+    ("MISTIMED", {
+        "mistimed", "miscued", "top edge", "bottom edge", 
+        "leading edge", "thick edge"
     }),
     ("ROTATING", {
         "pushed", "nudged", "glanced", "tickled", "worked",
@@ -53,6 +43,7 @@ _INTENT_TOKENS = [
     }),
     ("DEFENSIVE", {
         "defended", "blocked", "padded", "left", "shouldered",
+        "played out", "left alone", "padded away", "dot ball"
     }),
 ]
 
@@ -103,8 +94,9 @@ def compute_shot_intent(delivery: dict, commentary: str = "") -> str:
 _ZONE_TOKENS = [
     ("BOUNCER", {"bouncer", "beamer"}),
     ("YORKER",  {"yorker", "full toss", "toe-crusher"}),
-    ("FULL",    {"full", "overpitched", "half-volley"}),
-    ("SHORT",   {"short", "short-pitched", "pulled", "bounced"}),
+    ("FULL",    {"full", "overpitched", "half-volley", "full ball", "slot ball"}),
+    ("SHORT",   {"short", "short-pitched", "pulled", "bounced", "short ball", "short of length", "back of length", "pulled from short"}),
+    ("GOOD_LENGTH", {"good length", "nagging", "line and length"}),
 ]
 
 _GOOD_LENGTH_PACE = {"RF", "RFM", "LF", "LFM", "MF", "RMF", "LMF"}
@@ -167,8 +159,9 @@ def compute_pitch_zone(
 # ═══════════════════════════════════════════════════════════════════
 
 _FALSE_SHOT_TOKENS = {
-    "edged", "outside edge", "inside edge",
-    "play and miss", "beaten", "dropped",
+    "edged", "outside edge", "inside edge", "thick outside edge",
+    "play and miss", "beaten", "dropped", "played and missed",
+    "went past the bat", "rattle the stumps", "hit pad",
 }
 
 
@@ -266,27 +259,38 @@ def compute_xR(
     wickets_in_innings: int = 0,
 ) -> float:
     """
-    Returns expected runs. Uses scikit-learn model if available,
-    otherwise falls back to deterministic lookup table.
+    Returns expected runs. Uses LightGBM model via ``ml.predictor``
+    if available, otherwise falls back to deterministic lookup table.
     """
-    if xr_model is not None:
-        try:
-            df = pd.DataFrame([{
-                "shot_intent": shot_intent,
-                "pitch_length_zone": pitch_zone,
-                "is_false_shot": int(is_false_shot),
-                "innings": innings,
-                "over": over_number,
-                "runs_in_over_so_far": runs_in_over_so_far,
-                "wickets_in_innings": wickets_in_innings
-            }])
-            pred = float(xr_model.predict(df)[0])
-            # Cap outputs
-            return round(max(0.0, min(pred, 6.0)), 4)
-        except Exception as e:
-            logger.warning(f"xR inference failed: {e}. Falling back to heuristics.")
+    intent_map = {"UNKNOWN": 0, "DEFENSIVE": 1, "ATTACKING": 2, "MISTIMED": 3}
+    zone_map = {"UNKNOWN": 0, "FULL": 1, "GOOD_LENGTH": 2, "SHORT": 3}
+    
+    ball = int(delivery.get("ball", 1)) if isinstance(delivery, dict) else 1
+    over_val = float(over_number) + (ball - 1) / 10.0
+    
+    if over_val < 6:
+        phase = 0
+    elif over_val < 15:
+        phase = 1
+    else:
+        phase = 2
 
-    # Fallback
+    features = {
+        "batting_position": 6,
+        "phase": phase,
+        "ball_number": ball,
+        "is_pace": 0,
+        "venue": 0,
+        "shot_intent": intent_map.get(shot_intent.upper(), 0),
+        "pitch_zone": zone_map.get(pitch_zone.upper(), 0),
+        "computed_false_shot": 1 if is_false_shot else 0
+    }
+
+    ml_pred = predictor.predict_xR(features)
+    if ml_pred != -1.0:
+        return ml_pred
+
+    # Fallback to deterministic lookup table
     intent_row = _XR_TABLE.get(shot_intent, _XR_TABLE["UNKNOWN"])
     base = intent_row.get(pitch_zone, intent_row.get("UNKNOWN", 0.4))
 
@@ -348,27 +352,39 @@ def compute_xW(
     wickets_in_innings: int = 0,
 ) -> float:
     """
-    Returns expected wicket probability. Uses scikit-learn model if available,
-    otherwise falls back to deterministic lookup table.
+    Returns expected wicket probability. Uses calibrated LightGBM
+    classifier via ``ml.predictor`` if available, otherwise falls
+    back to deterministic lookup table.
     """
-    if xw_model is not None:
-        try:
-            df = pd.DataFrame([{
-                "shot_intent": shot_intent,
-                "pitch_length_zone": pitch_zone,
-                "is_false_shot": int(is_false_shot),
-                "innings": innings,
-                "over": over_number,
-                "runs_in_over_so_far": runs_in_over_so_far,
-                "wickets_in_innings": wickets_in_innings
-            }])
-            pred = float(xw_model.predict(df)[0])
-            # Cap outputs
-            return round(max(0.0, min(pred, 1.0)), 4)
-        except Exception as e:
-            logger.warning(f"xW inference failed: {e}. Falling back to heuristics.")
+    intent_map = {"UNKNOWN": 0, "DEFENSIVE": 1, "ATTACKING": 2, "MISTIMED": 3}
+    zone_map = {"UNKNOWN": 0, "FULL": 1, "GOOD_LENGTH": 2, "SHORT": 3}
+    
+    ball = int(delivery.get("ball", 1)) if isinstance(delivery, dict) else 1
+    over_val = float(over_number) + (ball - 1) / 10.0
+    
+    if over_val < 6:
+        phase = 0
+    elif over_val < 15:
+        phase = 1
+    else:
+        phase = 2
 
-    # Fallback
+    features = {
+        "batting_position": 6,
+        "phase": phase,
+        "ball_number": ball,
+        "is_pace": 0,
+        "venue": 0,
+        "shot_intent": intent_map.get(shot_intent.upper(), 0),
+        "pitch_zone": zone_map.get(pitch_zone.upper(), 0),
+        "computed_false_shot": 1 if is_false_shot else 0
+    }
+
+    ml_pred = predictor.predict_xW(features)
+    if ml_pred != -1.0:
+        return ml_pred
+
+    # Fallback to deterministic lookup table
     intent_row = _XW_TABLE.get(shot_intent, _XW_TABLE["UNKNOWN"])
     base = intent_row.get(pitch_zone, intent_row.get("UNKNOWN", 0.04))
 

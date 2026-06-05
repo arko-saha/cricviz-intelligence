@@ -2,6 +2,9 @@ import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { triggerIngest, fetchJobStatus, fetchStats, fetchHealth } from '../api/client';
 import MetricCard from '../components/MetricCard';
+import PlayerMergeQueue from '../components/PlayerMergeQueue';
+import MLModelStatus from '../components/MLModelStatus';
+import CommentaryEnrichment from '../components/CommentaryEnrichment';
 
 /**
  * PILLAR 3 — Pipeline Control
@@ -13,6 +16,7 @@ import MetricCard from '../components/MetricCard';
  */
 export default function PipelineControl() {
   const [source, setSource] = useState('');
+  const [eventFilter, setEventFilter] = useState('');
   const [jobId, setJobId] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
@@ -54,9 +58,10 @@ export default function PipelineControl() {
     setError(null);
 
     try {
-      const result = await triggerIngest(source.trim());
+      const result = await triggerIngest(source.trim(), eventFilter.trim() || null);
       setJobId(result.job_id);
       setSource('');
+      setEventFilter('');
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to start ingestion');
     } finally {
@@ -118,8 +123,23 @@ export default function PipelineControl() {
               />
             </div>
 
+            <div className="form-group" style={{ marginTop: 'var(--space-4)' }}>
+              <label className="form-label" htmlFor="ingest-filter">
+                Tournament Filter (Optional)
+              </label>
+              <input
+                id="ingest-filter"
+                type="text"
+                className="form-input"
+                placeholder="e.g., Bangladesh Premier League"
+                value={eventFilter}
+                onChange={(e) => setEventFilter(e.target.value)}
+                disabled={submitting}
+              />
+            </div>
+
             {error && (
-              <div className="ai-error" style={{ marginBottom: 'var(--space-4)' }}>
+              <div className="ai-error" style={{ marginBottom: 'var(--space-4)', marginTop: 'var(--space-4)' }}>
                 {error}
               </div>
             )}
@@ -145,18 +165,25 @@ export default function PipelineControl() {
                 { name: 'ODIs', url: 'https://cricsheet.org/downloads/odis_json.zip' },
                 { name: 'T20Is', url: 'https://cricsheet.org/downloads/t20s_json.zip' },
                 { name: 'Big Bash League', url: 'https://cricsheet.org/downloads/bbl_json.zip' },
-                { name: 'Bangladesh Premier League', url: 'https://cricsheet.org/downloads/bpl_json.zip' },
+                { name: 'Bangladesh Premier League', url: 'https://cricsheet.org/downloads/t20s_json.zip', filter: 'Bangladesh Premier League' },
                 { name: 'Caribbean Premier League', url: 'https://cricsheet.org/downloads/cpl_json.zip' },
-                { name: 'The Hundred', url: 'https://cricsheet.org/downloads/hnd_json.zip' },
+                { name: 'The Hundred', url: 'https://cricsheet.org/downloads/hundred_json.zip' },
                 { name: 'Indian Premier League', url: 'https://cricsheet.org/downloads/ipl_json.zip' },
-                { name: 'Lanka Premier League', url: 'https://cricsheet.org/downloads/lpl_json.zip' },
+                { name: 'Lanka Premier League', url: 'https://cricsheet.org/downloads/t20s_json.zip', filter: 'Lanka Premier League' },
                 { name: 'Pakistan Super League', url: 'https://cricsheet.org/downloads/psl_json.zip' },
+                { name: 'SA20', url: 'https://cricsheet.org/downloads/sa20_json.zip' },
+                { name: 'ILT20', url: 'https://cricsheet.org/downloads/ilt20_json.zip' },
+                { name: 'T20 Blast', url: 'https://cricsheet.org/downloads/t20s_json.zip', filter: 'Vitality Blast' },
               ].map(source => (
                 <button
                   key={source.name}
+                  type="button"
                   className="btn btn-secondary text-xs"
                   style={{ justifyContent: 'flex-start', padding: 'var(--space-2)' }}
-                  onClick={() => setSource(source.url)}
+                  onClick={() => {
+                    setSource(source.url);
+                    setEventFilter(source.filter || '');
+                  }}
                 >
                   <svg className="w-4 h-4 mr-1 text-teal" fill="none" stroke="currentColor" viewBox="0 0 24 24" style={{ width: '14px', height: '14px', marginRight: '6px', color: 'var(--accent-teal)' }}><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
                   {source.name}
@@ -267,6 +294,34 @@ export default function PipelineControl() {
           )}
         </div>
       </div>
+
+      {/* Admin / Advanced Tools */}
+      <div className="grid-2" style={{ marginTop: 'var(--space-8)' }}>
+        {/* Commentary Enrichment */}
+        <section style={{ gridColumn: '1 / -1', marginBottom: 'var(--space-4)' }}>
+          <div className="page-subtitle" style={{ marginBottom: 'var(--space-4)', color: 'var(--text-primary)', fontWeight: 'var(--weight-semibold)' }}>
+            Commentary
+          </div>
+          <CommentaryEnrichment />
+        </section>
+
+        {/* Player Identity */}
+        <section>
+          <div className="page-subtitle" style={{ marginBottom: 'var(--space-4)', color: 'var(--text-primary)', fontWeight: 'var(--weight-semibold)' }}>
+            Player Identity
+          </div>
+          <PlayerMergeQueue />
+        </section>
+
+        {/* ML Model Status */}
+        <section>
+          <div className="page-subtitle" style={{ marginBottom: 'var(--space-4)', color: 'var(--text-primary)', fontWeight: 'var(--weight-semibold)' }}>
+            Model Status
+          </div>
+          <MLModelStatus />
+        </section>
+      </div>
+
     </div>
   );
 }

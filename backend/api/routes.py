@@ -27,8 +27,9 @@ from api.schemas import (
     StatsResponse, HealthResponse,
     JobStatusResponse,
     AIInsightRequest, AIInsightResponse,
-    MLStatusResponse,
+    MLStatusResponse, RetrainResponse,
     GlobalSearchResponse,
+    CommentaryEnrichRequest, CommentaryEnrichResponse, CommentaryEnrichMatchResult,
 )
 from api.auth import (
     get_password_hash, verify_password, create_access_token, get_current_user
@@ -106,7 +107,7 @@ async def ingest(
     if source.lower().endswith(".csv"):
         run_csv_ingestion_task.delay(source, job_id)
     else:
-        run_zip_ingestion_task.delay(source, job_id)
+        run_zip_ingestion_task.delay(source, job_id, event_filter=body.event_filter)
 
     return IngestResponse(job_id=job_id, status="queued")
 
@@ -317,7 +318,7 @@ async def ai_insight(
 async def ml_status():
     """Returns the load status and metadata of the xR and xW machine learning models."""
     import os
-    from service import enrichment
+    from ml import predictor
 
     metadata_path = os.path.join(os.path.dirname(__file__), "..", "ml", "models", "metadata.json")
     metadata = {}
@@ -329,12 +330,116 @@ async def ml_status():
         except Exception as e:
             logger.warning(f"Could not read ML metadata: {e}")
 
+    status = predictor.get_model_status()
+
     return MLStatusResponse(
-        xr_model_loaded=enrichment.xr_model is not None,
-        xw_model_loaded=enrichment.xw_model is not None,
+        xr_model_loaded=status["xr_loaded"],
+        xw_model_loaded=status["xw_loaded"],
+        model_type=metadata.get("model_type"),
         training_date=metadata.get("training_date"),
         sample_size=metadata.get("sample_size"),
+        train_size=metadata.get("train_size"),
+        test_size=metadata.get("test_size"),
+        features=metadata.get("features"),
+        xr_evaluation=metadata.get("xr_evaluation"),
+        xw_evaluation=metadata.get("xw_evaluation"),
     )
+
+
+# ═══════════════════════════════════════════════════════════════════
+# POST /ml/retrain
+# ═══════════════════════════════════════════════════════════════════
+
+@router.post("/ml/retrain", response_model=RetrainResponse)
+async def retrain_models(
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Trigger xR / xW model retraining in the background.
+
+    Requires authentication (admin only).  Training runs in a
+    background thread; the endpoint returns immediately.
+    After training completes, models are hot-reloaded.
+    """
+    import asyncio
+    from ml.train import train_models
+    from ml import predictor
+
+    async def _train_and_reload():
+        loop = asyncio.get_running_loop()
+        try:
+            await loop.run_in_executor(None, train_models)
+            predictor.reload_models()
+            logger.info("ML models retrained and hot-reloaded successfully.")
+        except Exception as exc:
+            logger.exception("ML retraining failed: %s", exc)
+
+    asyncio.create_task(_train_and_reload())
+
+    return RetrainResponse(
+        status="training_started",
+        message="xR/xW model training initiated in the background. "
+                "Check GET /api/ml/status for results.",
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════
+# POST /commentary/enrich
+# ═══════════════════════════════════════════════════════════════════
+
+@router.post("/commentary/enrich", response_model=CommentaryEnrichResponse)
+async def commentary_enrich(
+    body: CommentaryEnrichRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Manually trigger commentary enrichment.
+
+    - If ``match_id`` is provided, enriches that single match.
+    - Otherwise enriches recent matches within the lookback window.
+
+    Requires authentication (admin only).
+    """
+    import asyncio
+    from ingestion.commentary_enricher import enrich_match, enrich_recent_matches
+
+    loop = asyncio.get_running_loop()
+
+    try:
+        if body.match_id:
+            result = await loop.run_in_executor(
+                None, enrich_match, body.match_id,
+            )
+            results_raw = [result]
+        else:
+            results_raw = await loop.run_in_executor(
+                None, enrich_recent_matches, body.days, body.limit,
+            )
+
+        results = [
+            CommentaryEnrichMatchResult(
+                match_id=r.match_id,
+                team1=r.team1,
+                team2=r.team2,
+                deliveries_updated=r.deliveries_updated,
+                deliveries_skipped=r.deliveries_skipped,
+                api_found=r.api_found,
+                error=r.error,
+            )
+            for r in results_raw
+        ]
+
+        total_updated = sum(r.deliveries_updated for r in results)
+
+        return CommentaryEnrichResponse(
+            status="completed",
+            results=results,
+            total_updated=total_updated,
+        )
+
+    except Exception as e:
+        logger.exception("Commentary enrichment failed")
+        raise HTTPException(status_code=500, detail=f"Enrichment error: {str(e)}")
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -350,3 +455,7 @@ async def prewarm_ai_models(background_tasks: BackgroundTasks):
     from service.ai_analyst import prewarm_models
     background_tasks.add_task(prewarm_models)
     return {"status": "prewarming_initiated"}
+
+# Include the newly created pipeline router
+from api.routers.pipeline import router as pipeline_router
+router.include_router(pipeline_router, prefix="/pipeline", tags=["Pipeline"])

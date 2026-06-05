@@ -20,14 +20,10 @@ logging.basicConfig(
 # ── Create tables ────────────────────────────────────────────────
 Base.metadata.create_all(bind=engine)
 
-# ── Manual Migration ─────────────────────────────────────────────
-# Add gender column if it does not exist (SQLite safe approach via try/except)
-from sqlalchemy import text
-with engine.begin() as conn:
-    try:
-        conn.execute(text("ALTER TABLE matches ADD COLUMN gender VARCHAR(10) NOT NULL DEFAULT 'male'"))
-    except Exception:
-        pass  # Column likely already exists
+# ── Migrations ───────────────────────────────────────────────────
+# Schema migrations are managed by Alembic.  Run:
+#   alembic upgrade head
+# See alembic/versions/ for the migration history.
 
 # ── App ──────────────────────────────────────────────────────────
 app = FastAPI(
@@ -48,10 +44,31 @@ app.add_middleware(
 # ── Mount routes ─────────────────────────────────────────────────
 app.include_router(router, prefix="/api")
 
+from api.routers.ml import router as ml_router
+app.include_router(ml_router, prefix="/api/v1/ml", tags=["ML"])
+
+from api.routers.admin import router as admin_router
+app.include_router(admin_router, prefix="/api/v1/admin", tags=["Admin"])
+
 # ── Lifecycle ────────────────────────────────────────────────────
 @app.on_event("startup")
 async def startup_event():
     import asyncio
     from service.ai_analyst import prewarm_models
+    from ingestion.player_registry import ensure_registry_fresh
+    from database import SessionLocal
+    
     # Run synchronously blocking request in a separate thread so server boots immediately
     asyncio.create_task(asyncio.to_thread(prewarm_models))
+    
+    # Ensure player registry is populated and fresh
+    def check_registry():
+        db = SessionLocal()
+        try:
+            ensure_registry_fresh(db)
+        finally:
+            db.close()
+            
+    asyncio.create_task(asyncio.to_thread(check_registry))
+
+

@@ -12,7 +12,8 @@ from sqlalchemy import (
     Column, String, Integer, Float, Boolean, DateTime,
     ForeignKey, Index, Text, UniqueConstraint,
 )
-from sqlalchemy.orm import relationship, declarative_base
+from typing import Optional
+from sqlalchemy.orm import relationship, declarative_base, Mapped, mapped_column
 
 Base = declarative_base()
 
@@ -58,6 +59,7 @@ class Player(Base):
 
     id            = Column(String(36), primary_key=True, default=_uuid)
     name          = Column(String(200), nullable=False)
+    cricsheet_identifier = Column(String(50), nullable=True, unique=True, index=True)
     handedness    = Column(String(20), nullable=True)   # RHB, LHB
     bowling_style = Column(String(40), nullable=True)   # RF, RFM, OB, LB, …
     country       = Column(String(100), nullable=True)
@@ -113,6 +115,8 @@ class Delivery(Base):
         nullable=True,     # ← only nullable FK
         index=True,
     )
+
+    commentary_text = Column(Text, nullable=True)  # Populated by post-ingestion enricher
 
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(
@@ -208,3 +212,58 @@ class User(Base):
 # ☑ Cascade deletes defined (matches→deliveries, deliveries→metrics, players→SET NULL on fielder)
 # ☑ UUID strategy consistent: String(36) + uuid4() default across all tables
 # ☑ cricviz_metrics.delivery_id is both PK and FK (one-to-one enforced)
+
+
+# ═══════════════════════════════════════════════════════════════════
+# CRICSHEET REGISTRY
+# ═══════════════════════════════════════════════════════════════════
+class PlayerRegistry(Base):
+    __tablename__ = "player_registry"
+
+    identifier = Column(String(50), primary_key=True)
+    name = Column(String(250), nullable=False)
+    unique_name = Column(String(250), nullable=False)
+    canonical_name = Column(String(250), nullable=False, index=True)
+    key_cricinfo = Column(String(50), nullable=True)
+    key_espn = Column(String(50), nullable=True)
+    key_cricbuzz = Column(String(50), nullable=True)
+    key_bigbash = Column(String(50), nullable=True)
+    key_crichq = Column(String(50), nullable=True)
+    key_opta = Column(String(50), nullable=True)
+    key_nvplay = Column(String(50), nullable=True)
+    key_cricsheet = Column(String(50), nullable=True)
+    key_rhino = Column(String(50), nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow,
+        nullable=False,
+    )
+
+
+class PlayerMergeQueue(Base):
+    __tablename__ = "player_merge_queue"
+
+    id = Column(String(36), primary_key=True, default=_uuid)
+    raw_name = Column(String(250), nullable=False)
+    matched_canonical = Column(String(250), nullable=False)
+    fuzzy_score = Column(Float, nullable=False)
+    status = Column(String(50), nullable=False, default="pending")  # pending, approved, rejected
+
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow,
+        nullable=False,
+    )
+
+# ═══════════════════════════════════════════════════════════════════
+# API USAGE LOG
+# ═══════════════════════════════════════════════════════════════════
+class APIUsageLog(Base):
+    __tablename__ = "api_usage_log"
+    
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    api_name: Mapped[str] = mapped_column(String(50), nullable=False)  # "cricketdata"
+    called_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    match_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    deliveries_updated: Mapped[int] = mapped_column(Integer, default=0)

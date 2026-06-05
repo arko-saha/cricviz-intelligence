@@ -11,6 +11,8 @@ from pydantic import BaseModel, Field
 
 class IngestRequest(BaseModel):
     source: str = Field(..., min_length=1, description="Local path or URL to Cricsheet ZIP/CSV")
+    event_filter: Optional[str] = Field(None, description="Substring match for tournament event.name")
+
 
 
 # ── Responses ────────────────────────────────────────────────────
@@ -144,8 +146,19 @@ class AIInsightResponse(BaseModel):
 class MLStatusResponse(BaseModel):
     xr_model_loaded: bool
     xw_model_loaded: bool
+    model_type: Optional[str] = None
     training_date: Optional[str] = None
     sample_size: Optional[int] = None
+    train_size: Optional[int] = None
+    test_size: Optional[int] = None
+    features: Optional[List[str]] = None
+    xr_evaluation: Optional[dict] = None
+    xw_evaluation: Optional[dict] = None
+
+
+class RetrainResponse(BaseModel):
+    status: str
+    message: str = ""
 
 
 # ── Global Search ────────────────────────────────────────────────
@@ -165,3 +178,36 @@ class MatchSearchResult(BaseModel):
 class GlobalSearchResponse(BaseModel):
     players: List[PlayerSearchResult]
     matches: List[MatchSearchResult]
+
+
+# ── Commentary Enrichment ────────────────────────────────────────
+
+class CommentaryEnrichRequest(BaseModel):
+    match_id: Optional[str] = Field(
+        None,
+        description="Enrich a specific match.  If omitted, enriches recent matches.",
+    )
+    days: Optional[int] = Field(
+        None, ge=1, le=365,
+        description="Lookback window in days (ignored when match_id is set).",
+    )
+    limit: Optional[int] = Field(
+        None, ge=1, le=500,
+        description="Max matches to process (ignored when match_id is set).",
+    )
+
+
+class CommentaryEnrichMatchResult(BaseModel):
+    match_id: str
+    team1: str = ""
+    team2: str = ""
+    deliveries_updated: int = 0
+    deliveries_skipped: int = 0
+    api_found: bool = False
+    error: Optional[str] = None
+
+
+class CommentaryEnrichResponse(BaseModel):
+    status: str
+    results: List[CommentaryEnrichMatchResult]
+    total_updated: int = 0

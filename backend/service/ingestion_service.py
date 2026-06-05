@@ -154,11 +154,14 @@ def _process_innings(
     innings_list: list, 
     player_cache: dict, 
     source_file: str,
-    match_commentary: dict
+    match_commentary: dict,
+    registry_people: dict
 ) -> tuple[int, int]:
     """Processes all innings and deliveries for a match."""
     deliveries_parsed = 0
     deliveries_enriched = 0
+    from ingestion.player_registry import resolve_player
+    from models import Player
     
     def get_or_create_player(name: str, country: str = None) -> Any:
         if not name:
@@ -166,7 +169,14 @@ def _process_innings(
         cache_key = f"{name}|{country or ''}"
         if cache_key in player_cache:
             return player_cache[cache_key]
-        p = player_repo.upsert_player(db, name=name, country=country)
+        
+        identifier = registry_people.get(name)
+        p_id = resolve_player(name, identifier, db)
+        p = db.query(Player).get(p_id)
+        if country and not p.country:
+            p.country = country
+            db.commit()
+            
         player_cache[cache_key] = p
         return p
 
@@ -291,18 +301,23 @@ def ingest_match_dict(
         # Pre-populate player cache from registry
         player_cache: Dict[str, Any] = {}
         registry = info.get("registry", {}).get("people", {})
-        for player_name in registry:
+        from ingestion.player_registry import resolve_player
+        from models import Player
+        for player_name, player_id in registry.items():
             if player_name:
-                p = player_repo.upsert_player(db, name=player_name)
+                p_id = resolve_player(player_name, player_id, db)
+                p = db.query(Player).get(p_id)
                 player_cache[f"{player_name}|"] = p
 
-        import os
         from service.commentary_client import fetch_match_commentary
-        cricsheet_id = os.path.splitext(os.path.basename(source_file))[0]
-        match_commentary = fetch_match_commentary(cricsheet_id)
+        match_commentary = fetch_match_commentary(
+            team1=match_meta["team1"],
+            team2=match_meta["team2"],
+            match_date=match_meta["date"],
+        )
 
         # Parse innings
-        parsed, enriched = _process_innings(db, match.id, innings_list, player_cache, source_file, match_commentary)
+        parsed, enriched = _process_innings(db, match.id, innings_list, player_cache, source_file, match_commentary, registry)
         deliveries_parsed = parsed
 
         db.commit()
@@ -408,13 +423,16 @@ def ingest_csv_row_batch(
         )
 
         player_cache: Dict[str, Any] = {}
+        from ingestion.player_registry import resolve_player
+        from models import Player
 
         def get_player(name: str) -> Any:
             if not name:
                 return None
             if name in player_cache:
                 return player_cache[name]
-            p = player_repo.upsert_player(db, name=name)
+            p_id = resolve_player(name, None, db)
+            p = db.query(Player).get(p_id)
             player_cache[name] = p
             return p
 

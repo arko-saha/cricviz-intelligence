@@ -74,3 +74,7 @@ CRICAPI_KEY = os.getenv("CRICAPI_KEY", "")
 
 # ── Ingestion ────────────────────────────────────────────────────
 CRICSHEET_DEFAULT_URL = "https://cricsheet.org/downloads/t20s_json.zip"
+
+# ── Commentary Enrichment ────────────────────────────────────────
+COMMENTARY_ENRICH_DAYS = int(os.getenv("COMMENTARY_ENRICH_DAYS", "7"))
+COMMENTARY_DAILY_LIMIT = int(os.getenv("COMMENTARY_DAILY_LIMIT", "90"))

@@ -1,0 +1,32 @@
+{
+  "training_date": "2026-06-05T00:38:59.647072",
+  "sample_size": 250234,
+  "train_size": 243646,
+  "test_size": 6588,
+  "model_type": "LightGBM",
+  "features": [
+    "innings",
+    "over",
+    "ball",
+    "phase",
+    "runs_in_over_so_far",
+    "wickets_in_innings",
+    "cumulative_runs_in_innings",
+    "shot_intent",
+    "pitch_length_zone",
+    "is_false_shot",
+    "venue_group"
+  ],
+  "xr_evaluation": {
+    "mae": 0.2512,
+    "rmse": 0.4451,
+    "training_seconds": 8.0
+  },
+  "xw_evaluation": {
+    "auc_roc": 0.9963,
+    "brier_score": 0.0013,
+    "precision_at_0.05": 0.9433,
+    "recall_at_0.05": 0.9794,
+    "training_seconds": 31.8
+  }
+}

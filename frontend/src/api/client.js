@@ -67,8 +67,8 @@ export const fetchHealth = () =>
   api.get('/health').then(r => r.data);
 
 // ── Ingestion ────────────────────────────────────────────────────
-export const triggerIngest = (source) =>
-  api.post('/ingest', { source }).then(r => r.data);
+export const triggerIngest = (source, eventFilter = null) =>
+  api.post('/ingest', { source, event_filter: eventFilter }).then(r => r.data);
 
 export const fetchJobStatus = (jobId) =>
   api.get(`/ingest/status/${jobId}`).then(r => r.data);
@@ -80,5 +80,22 @@ export const fetchAIInsight = (contextData, contextType = 'match') =>
 
 export const prewarmAI = () =>
   api.post('/ai/prewarm').then(r => r.data).catch(() => {});
+
+// ── Admin ────────────────────────────────────────────────────────
+export const getMergeQueue = () =>
+  api.get('/admin/merge-queue').then(r => r.data);
+
+export const resolveMerge = (queueId, action, canonical = null) =>
+  api.patch(`/admin/merge-queue/${queueId}/resolve`, { action, canonical }).then(r => r.data);
+
+// ── ML ───────────────────────────────────────────────────────────
+export const fetchModelInfo = () =>
+  api.get('/v1/ml/model-info').then(r => r.data);
+
+export const fetchTrainingStats = () =>
+  api.get('/v1/ml/training-data-stats').then(r => r.data);
+
+export const retrainModels = (target) =>
+  api.post('/v1/ml/retrain', { target }).then(r => r.data);
 
 export default api;

@@ -138,6 +138,15 @@ class TestFalseShot:
 
 
 class TestXR:
+    def setup_method(self):
+        from service import enrichment
+        self.old_predictor = enrichment.predictor.predict_xR
+        enrichment.predictor.predict_xR = lambda *args, **kwargs: -1.0
+        
+    def teardown_method(self):
+        from service import enrichment
+        enrichment.predictor.predict_xR = self.old_predictor
+
     def test_attacking_full(self):
         result = compute_xR({}, "ATTACKING", "FULL", False)
         assert result == 1.8
@@ -157,6 +166,15 @@ class TestXR:
 
 
 class TestXW:
+    def setup_method(self):
+        from service import enrichment
+        self.old_predictor = enrichment.predictor.predict_xW
+        enrichment.predictor.predict_xW = lambda *args, **kwargs: -1.0
+        
+    def teardown_method(self):
+        from service import enrichment
+        enrichment.predictor.predict_xW = self.old_predictor
+
     def test_attacking_yorker(self):
         result = compute_xW({}, "ATTACKING", "YORKER", False)
         assert result == 0.12
@@ -191,6 +209,14 @@ class TestEnrichDelivery:
         assert result["shot_intent"] in ("DEFENSIVE", "UNKNOWN")
         assert result["computed_xR"] >= 0
         assert result["computed_xW"] >= 0
+
+    def test_pass_through_enrichment(self):
+        d = {"runs": {"batter": 6, "extras": 0, "total": 6}}
+        commentary_text = "He lofts it over long-on for a maximum! Brilliant shot, hit right out of the middle."
+        result = enrich_delivery(d, commentary_text, "RF")
+        assert result["shot_intent"] == "ATTACKING"
+        assert result["is_false_shot"] is False
+        assert result["commentary_source"] == "nlp_token"
 
 
 if __name__ == "__main__":

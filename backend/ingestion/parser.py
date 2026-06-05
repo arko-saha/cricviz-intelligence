@@ -61,7 +61,7 @@ def _download_to_temp(url: str) -> str:
     return tmp.name
 
 
-def run_ingestion(source: str, job_id: str = ""):
+def run_ingestion(source: str, job_id: str = "", event_filter: str = None):
     """
     Main ingestion entry point.
     `source` can be a local file path or a URL.
@@ -110,11 +110,25 @@ def run_ingestion(source: str, job_id: str = ""):
                 pass # Handled below
 
         # Stream-process each JSON match
+        skipped_count = 0
+        ingested_count = 0
         for filename, match_data in _iter_json_from_zip(zip_path):
+            if event_filter:
+                info = match_data.get("info", {})
+                event = info.get("event", {})
+                event_name = event.get("name", "") if isinstance(event, dict) else str(event)
+                if event_filter.lower() not in event_name.lower():
+                    skipped_count += 1
+                    continue
+            
+            ingested_count += 1
             with get_db_context() as db:
                 ingestion_service.ingest_match_dict(
                     db, match_data, source_file=filename, job_id=job_id,
                 )
+                
+        if event_filter and job_id:
+            ingestion_service._log_progress(job_id, {"status": "info", "reason": f"Skipped {skipped_count} files (event filter: {event_filter}), ingesting {ingested_count} files"})
 
     except zipfile.BadZipFile:
         logger.error(f"Bad ZIP file: {source}")
